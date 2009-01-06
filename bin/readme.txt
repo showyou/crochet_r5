@@ -4,4 +4,5 @@
 view フォームの画面周り。画面を押したときの処理はcontrollerで
 controller フォームのイベント処理とか
 model データの保存に使うクラス周り。ImageListとかの定義はここに。
-comm ネットワークの通信部分
+comm ネットワークの通信部分。twitter
+
