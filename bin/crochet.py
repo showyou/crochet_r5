@@ -9,6 +9,6 @@ class Crochet():
 	def start(self):
 		pass
 
-if __name__ == "main":
+if __name__ == "__main__":
 	c = Crochet()
 	c.start()
