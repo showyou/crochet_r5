@@ -1,158 +1,102 @@
-#! -*- coding:utf-8 -*-
-#! 外見に関するところを書く
-import os
-import sys
-import wx.aui
-
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
 import wx
+import wx.aui
 import wx.lib.ClickableHtmlWindow
 from wx.lib.mixins.listctrl import ListCtrlAutoWidthMixin
 
-#自動で chdirし，working directory を crochet のあるディレクトリにする
-#dir = os.path.split(sys.argv[0])[0]
-#os.chdir(dir)
+from twisted.internet import wxreactor
+wxreactor.install()
+from twisted.internet import reactor
+from twisted.web import client
+import simplejson
 
-try:
-    import Growl
-    g_growl = True
-except:
-    print "not exist:Growl sdk"
-    g_growl = False
+import observer
+import comm
+
+ID_EXIT = 101
 
 """自動リサイズするListCtrl"""
 class ListCtrlAutoWidth(wx.ListCtrl, ListCtrlAutoWidthMixin):
     def __init__(self, parent):
-        wx.ListCtrl.__init__(self,parent,
-                             style=wx.LC_REPORT|wx.LC_HRULES|wx.LC_SINGLE_SEL)
+        wx.ListCtrl.__init__(self,parent,style=wx.LC_REPORT|wx.LC_HRULES
+                              |wx.LC_SINGLE_SEL)
         ListCtrlAutoWidthMixin.__init__(self)
 
-
 class TmpTwitPage(wx.NotebookPage):
-    """
-    全てのnotebookpageの基になるページクラス
-    """
-   
-    def __init__(self, title, parent, threadLock):
-
-        wx.NotebookPage.__init__(self,parent.getNotebook(),-1)
-        self.dataList = []
-        self.hiddenDataList = []
-        self.tmpDataList = []
-        self.tmpHiddenDataList = []
+    def __init__(self, title, parent):
         self.count = 0
         self.selectedRow = 0
         self.title = title
         self.owner = parent
-        self.lock = threadLock
-        #self.dataListLock = thread.allocate_lock() 
+        wx.NotebookPage.__init__(self,parent.getNotebook(),-1)
         
         parent.getNotebook().AddPage(self,title)
-       
-       
+        
         list = self.list = ListCtrlAutoWidth(self)
+        #list.Bind(wx.EVT_KEY_DOWN, self.myKeyHandler)
+        #list.Bind(wx.EVT_LIST_ITEM_ACTIVATED,self.OnDoubleClick)
+        
         list.InsertColumn(0," ",1,20)
         list.InsertColumn(1,u"ユーザ")
         list.InsertColumn(2,u"発言",width=300)
         list.InsertColumn(3,u"時刻",width=60);
-        
-        # Bind先関数はcontrolに移す
         #list.Bind(wx.EVT_LIST_ITEM_SELECTED,self.OnTwitListSelect)
-        #list.Bind(wx.EVT_KEY_DOWN, self.myKeyHandler)
-        #list.Bind(wx.EVT_LIST_ITEM_ACTIVATED,self.OnDoubleClick)
 
-        if g_growl == True:
-            self.g = parent.g
-            self.img = parent.img
-
-
-class CustomPage(TmpTwitPage):
-    """
-    カスタムページ(自分でフィルタリングする)
-    """
-    def __init__(self,title, parent,threadLock):
-        TmpTwitPage.__init__(self, title, parent, threadLock)     
-        self.dataList = []      
+        #a = self.imageListProxy = ImageListProxy()
+        #list.AssignImageList( a.imageList, wx.IMAGE_LIST_SMALL)
 
 
 class RecentPage(TmpTwitPage):
     """
     最近のfriendsの発言一覧を表示するページ
-    customPageは上に移った
     """
-    def __init__(self, parent,threadLock,filter):
-		TmpTwitPage.__init__(self,u"最新",parent,threadLock)
-
-		self.customPages = {}# フィルタリングページの固まり？
-		self.filter = filter
-
-    
-class ReplyPage(TmpTwitPage):
-
-	def __init__(self, parent,threadLock):
-		TmpTwitPage.__init__(self,"Re",parent,threadLock)
-
-
-class DMPage(TmpTwitPage):
-
-	def __init__(self, parent,threadLock):
-		TmpTwitPage.__init__(self,"DM",parent,threadLock)
-		dataList = []
-
+    def __init__(self, parent,filter):
+        TmpTwitPage.__init__(self,u"最新",parent)
 
 class TwitHtml(wx.lib.ClickableHtmlWindow.PyClickableHtmlWindow):
-	def __init__(self, parent):
-		wx.lib.ClickableHtmlWindow.PyClickableHtmlWindow.__init__(self,parent,-1,size=(90,50),style=wx.VSCROLL)
+    def __init__(self, parent):
+        wx.lib.ClickableHtmlWindow.PyClickableHtmlWindow.__init__(self,parent,-1,size=(90,50),style=wx.VSCROLL)
 
-	def SetValue(self, text):
-		self.SetPage(text)
-		pass
+    def SetValue(self, text):
+        self.SetPage(text)
+        pass
 
-
-class MainFrame(wx.Frame):
-    """
-    MainFrame class deffinition.
-    """
-
+class MyFrame(wx.Frame, observer.Listener):
     TIMER_ID = 1
-    TIMER_ID2= TIMER_ID+1
-    TIMER_ID3= TIMER_ID2+1
-	
-    ID_MNU_VIEW_POPUP = 100
-    ID_MNU_VIEW_LISTICON = 101
-    
-    def __init__(self):
-        wx.Frame.__init__(self,None, -1, "crochet")
-
-        if g_growl == True:
-            self.g = Growl.GrowlNotifier(
-                applicationName='crochet',notifications=['newTwit','newReply'])
-            self.g.register()
-       	    self.img = Growl.Image.imageFromPath('reply.png')	
-        self.CreateStatusBar()
-
-        self.selectedRow = -1
+    def __init__(self, parent, ID, title):
+        wx.Frame.__init__(self, parent, ID, title,
+                wx.DefaultPosition, wx.Size(300,200))
+        observer.Listener.__init__(self)
+ 
+        self.c = comm.Comm("config.json")
+        menu = wx.Menu()
+        menu.Append(ID_EXIT, "E&xit", "Terminate the program")
+        menuBar = wx.MenuBar()
+        menuBar.Append(menu, "&File");
+       
         text = self.text = wx.TextCtrl(self,-1,style=wx.TE_PROCESS_ENTER)
         #text.Bind(wx.EVT_TEXT_ENTER, self.OnSendTW)
-        button = self.button = wx.Button(self, -1, "Send")
-        #self.button.Bind(wx.EVT_BUTTON, self.OnSendTW) 
-
+        button = self.button = wx.Button(self, -1, "Send") 
+        #self.button.Bind(wx.EVT_BUTTON, self.OnSendTW)
+        
         notebook = self.notebook = wx.aui.AuiNotebook(
-                                       self,
-                                       -1,
-                                       style= wx.aui.AUI_NB_BOTTOM|
-                                              wx.aui.AUI_NB_WINDOWLIST_BUTTON|
-                                              wx.aui.AUI_NB_TAB_SPLIT
-                                     )
-        filter ="" #tmp code
-        self.httpThreadLock=""
-        self.recentPage = RecentPage(self,self.httpThreadLock,filter)
-        self.replyPage = ReplyPage(self,self.httpThreadLock)
-        self.directPage = DMPage(self,self.httpThreadLock) 
+                                    self,
+                                    -1,
+                                    style= wx.aui.AUI_NB_BOTTOM |
+                                           wx.aui.AUI_NB_WINDOWLIST_BUTTON|
+                                           wx.aui.AUI_NB_TAB_SPLIT
+                                   )
 
-        """for p in twTabConfig['tabName']:
-            page = CustomPage(p,self,self.httpThreadLock)
-            self.recentPage.AppendCustomPage(page,p)
-        """
+        filter = None
+        self.recentPage = RecentPage(self,filter)
+        #self.replyPage = ReplyPage(self,self.httpThreadLock)
+        #self.directPage = DMPage(self,self.httpThreadLock)
+
+        #for p in twTabConfig['tabName']:
+        #    page = CustomPage(p,self,self.httpThreadLock)
+        #    self.recentPage.AppendCustomPage(page,p)
+
         inputSizer = wx.BoxSizer(wx.HORIZONTAL)
         inputSizer.Add(self.text,2)
         inputSizer.Add(self.button,0)
@@ -170,71 +114,75 @@ class MainFrame(wx.Frame):
         messageSizer2 = wx.BoxSizer(wx.VERTICAL)
         messageSizer2.Add(messageSizer3,0,wx.EXPAND)
         messageSizer2.Add(messageText,0,wx.EXPAND)
-		
+
         messageSizer1 = wx.BoxSizer(wx.HORIZONTAL)
         messageSizer1.Add(userIcon,0,wx.EXPAND)
         messageSizer1.Add(messageSizer2,1,wx.EXPAND)
-	
-        messageSizer = wx.BoxSizer(wx.VERTICAL)	
+
+        messageSizer = wx.BoxSizer(wx.VERTICAL)
         messageSizer.Add(messageSizer1,0,wx.EXPAND)
         messageSizer.Add(inputSizer,0,wx.EXPAND)
 
         self.sizer = wx.BoxSizer(wx.VERTICAL)
         self.sizer.Add(notebook,2,wx.EXPAND)
         self.sizer.Add(messageSizer,0,wx.EXPAND)
-		
+        
         self.SetSizer(self.sizer)
         self.SetAutoLayout(True)
         inputSizer.Fit(self)
         self.sizer.Fit(self)
-	
-        #self.SetIcon(main_icon.getIcon())
-        self.SetSize((600,400))
-        
-        self.timer = wx.Timer(self,self.TIMER_ID)
-        #wx.EVT_TIMER(self,self.TIMER_ID,self.OnUpdate)
-        self.timer.Start(60000)
-		
-        self.timer11 = wx.Timer(self,self.TIMER_ID3+1)
-        #wx.EVT_TIMER(self,self.TIMER_ID3+1,self.OnUpdate2)
-        self.timer11.Start(3000)
 
-        self.timer2 = wx.Timer(self,self.TIMER_ID2)
-        #wx.EVT_TIMER(self,self.TIMER_ID2,self.OnReplyUpdate)
-        self.timer2.Start(300000)
-
-        self.timer3 = wx.Timer(self,self.TIMER_ID3)
-        #wx.EVT_TIMER(self,self.TIMER_ID3,self.OnDMUpdate)
-        self.timer3.Start(300000)
-
-        #self.SetNowTime2StatusBar()
-        self.CreateMenu()
-
-    
-    def CreateMenu(self):
-        #表示メニュー項目作る
-        viewMenu = wx.Menu()
-        self.popupCheck = viewMenu.Append(self.ID_MNU_VIEW_POPUP,u"新着通知",u"新着表示",kind = wx.ITEM_CHECK)
-        self.listIconCheck = viewMenu.Append(self.ID_MNU_VIEW_LISTICON,u"リストアイコン",u"リストボックスの横のアイコンの表示／非表示を切り替えます",kind=wx.ITEM_CHECK)
-
-        g_config = {}
-        g_config['popup'] = False #tmp code
-        viewMenu.Check(self.ID_MNU_VIEW_POPUP, g_config['popup'])
-        menuBar = wx.MenuBar()
-        menuBar.Append(viewMenu,u"表示")
-
-        #あとでcontrollerに結びつける
-        #wx.EVT_MENU(self, self.ID_MNU_VIEW_POPUP, self.OnMenuViewPopUp_Click)
-        #wx.EVT_MENU(self, self.ID_MNU_VIEW_LISTICON, self.OnMenuViewListIcon_Click)
+        self.x = wx.StaticText(self, -1, '-')
         self.SetMenuBar(menuBar)
+        wx.EVT_MENU(self, ID_EXIT,self.DoExit)
+
+        self.timer = self.startTimer(self.TIMER_ID,self.OnUpdate,20000)
+        self.CreateStatusBar()
+
+        print "loading MyFrame"
+        self.setStatusBar("start")
 
     def getNotebook(self):
         return self.notebook
 
-# startup application.
-if __name__=='__main__':
-    app = wx.App(False)
-    frame = MainFrame()
-    app.SetTopWindow(frame)
-    frame.Show()
-    app.MainLoop()
+    def DoExit(self, event):
+        self.Close(True)
+        reactor.stop()
+
+    def setStatusBar(self,str):
+        sb = wx.GetApp().GetTopWindow().GetStatusBar()
+        sb.SetStatusText(str)
+        print "setStatusBar %s" %str
+
+    def startTimer(self, timerID, func, span):
+        timer = wx.Timer(self,timerID)
+        wx.EVT_TIMER(self,timerID,func)
+        timer.Start(span)
+        return timer
+
+    def OnUpdate(self,event):
+
+        self.c.get()
+        self.setStatusBar("start: getPage")
+
+    def update(self, type, data):
+        print data
+        self.x.SetLabel(type)
+        self.setStatusBar("end: getPage")
+
+
+class MyApp(wx.App):
+    def __init__(self):
+        wx.App.__init__(self, False)
+        self.frame = MyFrame(None, -1, "Hello, world")
+        self.frame.Show(True)
+        self.SetTopWindow(self.frame)
+
+
+def main():
+    app = MyApp()
+    reactor.registerWxApp(app)
+    reactor.run()
+
+if __name__ == "__main__":
+    main()
