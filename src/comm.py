@@ -58,8 +58,8 @@ class Comm(observer.Listener):
             t.time = tw["created_at"]
             self.session.save(t)
 
-        self.testDB()
-        observer.notify("insertData", insertData)
+        #self.testDB()
+        observer.notify("recent", insertData)
 
 
     def testDB(self):
